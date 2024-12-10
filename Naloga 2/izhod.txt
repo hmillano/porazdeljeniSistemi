@@ -1,0 +1,16 @@
+Starting supervisor...
+Starting producer...
+Scaling up: Adding worker 2
+Scaling up: Adding worker 3
+Scaling up: Adding worker 4
+Scaling up: Adding worker 5
+Scaling up: Adding worker 6
+Scaling up: Adding worker 7
+Scaling up: Adding worker 8
+Scaling up: Adding worker 9
+Stopping producer...
+Scaling down: Removing a worker
+12473
+Processing rate: 0.228089 MReqs/s
+Average queue length: 98.58 %
+Max queue length 100.00 %
