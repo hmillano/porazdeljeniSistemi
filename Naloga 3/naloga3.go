@@ -97,7 +97,7 @@ func broadcastMessage(msg message, totalProcesses int) {
 }
 
 func main() {
-	portPtr := flag.Int("port", 9273, "Base port")
+	portPtr := flag.Int("p", 9273, "Base port")
 	idPtr := flag.Int("id", 0, "process ID")
 	nPtr := flag.Int("n", 2, "total number of processes")
 	mPtr := flag.Int("m", 1, "number of messages to send")
