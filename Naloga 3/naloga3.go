@@ -47,7 +47,7 @@ func receive(addr *net.UDPAddr, messageCh chan message) {
 		}
 
 		var receivedData string
-		Logger.UnpackReceive("Prejeto sporocilo ", buffer[:n], &receivedData, opts)
+		Logger.UnpackReceive("Prejeto sporocilo", buffer[:n], &receivedData, opts)
 
 		var msgID int
 		var content string
@@ -62,12 +62,10 @@ func send(addr *net.UDPAddr, msg message) {
 	checkError(err)
 	defer conn.Close()
 
-	Logger.LogLocalEvent("Priprava sporocila", opts)
+	Logger.LogLocalEvent("Priprava sporocila ", opts)
 	data := Logger.PrepareSend("Poslano sporocilo ", []byte(fmt.Sprintf("%d:%s", msg.ID, msg.Content)), opts)
 	_, err = conn.Write(data)
 	checkError(err)
-
-	// fmt.Printf("Process %d sent message ID %d to %s\n", id, msg.ID, addr.String())
 }
 
 func getRandomRecipients(excludeID int, count int, total int) []int {
@@ -87,8 +85,8 @@ func getRandomRecipients(excludeID int, count int, total int) []int {
 	return keys
 }
 
-func broadcastMessage(msg message, totalProcesses int) {
-	recipients := getRandomRecipients(id, K, totalProcesses)
+func broadcastMessage(msg message) {
+	recipients := getRandomRecipients(id, K, N)
 	for _, recipient := range recipients {
 		recipientAddr, _ := net.ResolveUDPAddr("udp", fmt.Sprintf("localhost:%d", basePort+recipient))
 		send(recipientAddr, msg)
@@ -110,7 +108,6 @@ func main() {
 	M = *mPtr
 	K = *kPtr
 
-	// dnevnik z vektorsko uro
 	Logger = govec.InitGoVector("Proces-"+strconv.Itoa(id), "Log-Proces-"+strconv.Itoa(id), govec.GetDefaultConfig())
 	opts = govec.GetDefaultLogOptions()
 
@@ -118,6 +115,7 @@ func main() {
 	checkError(err)
 
 	messageCh := make(chan message, 10)
+	processed = make(map[int]bool)
 
 	go receive(localAddr, messageCh)
 
@@ -125,25 +123,24 @@ func main() {
 
 	if id == 0 {
 		for i := 1; i <= M; i++ {
-			msg := message{ID: i, Content: fmt.Sprintf("Sporocilo-%d", i)}
-			// Logger.LogLocalEvent(fmt.Sprintf("Creating message ID %d", msg.ID), opts)
+			msg := message{ID: i, Content: strconv.Itoa(i)}
 			processed[msg.ID] = true
-			broadcastMessage(msg, N)
+			fmt.Printf("Process %d initiated message: %s\n", id, msg.Content)
+			broadcastMessage(msg)
 		}
 	} else {
-		for {
-			select {
-			case msg := <-messageCh:
-				if !processed[msg.ID] {
-					processed[msg.ID] = true
-					// Logger.LogLocalEvent(fmt.Sprintf("Processing message ID %d", msg.ID), opts)
-					// fmt.Printf("Process %d received message ID %d: %s\n", id, msg.ID, msg.Content)
-					broadcastMessage(msg, N)
+			for {
+				select {
+				case msg := <- messageCh:
+					if !processed[msg.ID] { // Process the message only if it's new
+						processed[msg.ID] = true
+						fmt.Printf("Process %d received message: %s\n", id, msg.Content)
+						broadcastMessage(msg)
+					}
+				case <-time.After(45 * time.Second):
+					fmt.Printf("Process %d timed out. No new messages received.\n", id)
+					return
 				}
-			case <-time.After(180 * time.Second):
-				fmt.Printf("Process %d timed out waiting for messages\n", id)
-				return
 			}
 		}
-	}
 }
