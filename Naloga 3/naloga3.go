@@ -140,7 +140,7 @@ func main() {
 					// fmt.Printf("Process %d received message ID %d: %s\n", id, msg.ID, msg.Content)
 					broadcastMessage(msg, N)
 				}
-			case <-time.After(30 * time.Second):
+			case <-time.After(180 * time.Second):
 				fmt.Printf("Process %d timed out waiting for messages\n", id)
 				return
 			}
