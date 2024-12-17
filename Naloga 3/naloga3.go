@@ -6,6 +6,7 @@ import (
 	"math/rand"
 	"net"
 	"strconv"
+	"strings"
 	"time"
 
 	"github.com/DistributedClocks/GoVector/govec"
@@ -50,11 +51,24 @@ func receive(addr *net.UDPAddr, messageCh chan message) {
 		var receivedData string
 		Logger.UnpackReceive("Prejeto sporocilo ", buffer[:n], &receivedData, opts)
 
-		var msgID int
+		// Updated parsing logic to correctly extract ID, FromID, and Content
+		var msgID, fromID int
 		var content string
-		var fromID int
-		fmt.Sscanf(receivedData, "%d:%d:%s", &msgID, &fromID, &content)
 
+		// Split the received string by ':' and parse values
+		parts := strings.SplitN(receivedData, ":", 3)
+		if len(parts) == 3 {
+			msgID, err = strconv.Atoi(parts[0])
+			checkError(err)
+			fromID, err = strconv.Atoi(parts[1])
+			checkError(err)
+			content = parts[2]
+		} else {
+			fmt.Printf("Process %d received invalid message format: %s\n", id, receivedData)
+			continue
+		}
+
+		// Send the parsed message to the channel
 		messageCh <- message{ID: msgID, Content: content, FromID: fromID}
 	}
 }
