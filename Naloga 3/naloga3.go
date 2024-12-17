@@ -14,6 +14,7 @@ import (
 type message struct {
 	ID      int
 	Content string
+	FromID  int // id from the previous process
 }
 
 var (
@@ -24,7 +25,7 @@ var (
 	K         int
 	id        int
 	basePort  int
-	processed map[int]bool
+	processed map[int]map[int]bool // map of senderID -> map of processed message IDs
 )
 
 func checkError(err error) {
@@ -51,22 +52,12 @@ func receive(addr *net.UDPAddr, messageCh chan message) {
 
 		var msgID int
 		var content string
-		fmt.Sscanf(receivedData, "%d:%s", &msgID, &content)
+		var fromID int
+		fmt.Sscanf(receivedData, "%d:%d:%s", &msgID, &fromID, &content)
 
-		messageCh <- message{ID: msgID, Content: content}
+		messageCh <- message{ID: msgID, Content: content, FromID: fromID}
 	}
 }
-
-// func send(addr *net.UDPAddr, msg message) {
-// 	conn, err := net.DialUDP("udp", nil, addr)
-// 	checkError(err)
-// 	defer conn.Close()
-
-// 	Logger.LogLocalEvent("Priprava sporocila ", opts)
-// 	data := Logger.PrepareSend("Poslano sporocilo ", []byte(fmt.Sprintf("%d:%s", msg.ID, msg.Content)), opts)
-// 	_, err = conn.Write(data)
-// 	checkError(err)
-// }
 
 func send(addr *net.UDPAddr, msg message) {
 	conn, err := net.DialUDP("udp", nil, addr)
@@ -77,7 +68,7 @@ func send(addr *net.UDPAddr, msg message) {
 
 	data := Logger.PrepareSend(
 		fmt.Sprintf("Poslano sporocilo z ID: %d", msg.ID),
-		[]byte(fmt.Sprintf("%d:%s", msg.ID, msg.Content)),
+		[]byte(fmt.Sprintf("%d:%d:%s", msg.ID, msg.FromID, msg.Content)),
 		opts,
 	)
 
@@ -115,7 +106,7 @@ func broadcastMessage(msg message) {
 func main() {
 	portPtr := flag.Int("p", 9273, "Base port")
 	idPtr := flag.Int("id", 0, "process ID")
-	nPtr := flag.Int("n", 2, "total number of processes")
+	nPtr := flag.Int("n", 4, "total number of processes")
 	mPtr := flag.Int("m", 3, "number of messages to send")
 	kPtr := flag.Int("k", 3, "number of messages to forward")
 	flag.Parse()
@@ -132,31 +123,44 @@ func main() {
 	localAddr, err := net.ResolveUDPAddr("udp", fmt.Sprintf("localhost:%d", basePort+id))
 	checkError(err)
 
-	messageCh := make(chan message, 10)
-	processed = make(map[int]bool)
+	messageCh := make(chan message, 20)
+	processed = make(map[int]map[int]bool)
 
 	go receive(localAddr, messageCh)
 
 	if id == 0 {
 		for i := 1; i <= M; i++ {
-			msg := message{ID: i, Content: strconv.Itoa(i)}
-			processed[msg.ID] = true
+			msg := message{ID: i, Content: strconv.Itoa(i), FromID: id}
+			// Mark message as processed for this process
+			if _, exists := processed[id]; !exists {
+				processed[id] = make(map[int]bool)
+			}
+			processed[id][msg.ID] = true
 			fmt.Printf("Process %d initiated message: %s\n", id, msg.Content)
 			broadcastMessage(msg)
 		}
 	} else {
-			for {
-				select {
-				case msg := <- messageCh:
-					if !processed[msg.ID] {
-						processed[msg.ID] = true
-						fmt.Printf("Process %d received message: %s\n", id, msg.Content)
-						broadcastMessage(msg)
+		for {
+			select {
+			case msg := <-messageCh:
+				// Check if this message has already been processed from this sender
+				if !processed[msg.FromID][msg.ID] {
+					// Mark this message as processed from the sender
+					if _, exists := processed[id]; !exists {
+						processed[id] = make(map[int]bool)
 					}
-				case <-time.After(45 * time.Second):
-					fmt.Printf("Process %d timed out. No new messages received.\n", id)
-					return
+					processed[id][msg.ID] = true
+
+					fmt.Printf("Process %d received message: %s\n", id, msg.Content)
+
+					// Forward the message to other processes (excluding the sender)
+					msg.FromID = id // Change the sender ID to the current process id
+					broadcastMessage(msg)
 				}
+			case <-time.After(45 * time.Second):
+				fmt.Printf("Process %d timed out. No new messages received.\n", id)
+				return
 			}
 		}
+	}
 }
