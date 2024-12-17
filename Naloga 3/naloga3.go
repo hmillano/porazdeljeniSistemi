@@ -24,7 +24,7 @@ var (
 	K         int
 	id        int
 	basePort  int
-	processed map[int]bool
+	alreadyProcessed map[int]bool
 )
 
 func checkError(err error) {
@@ -57,17 +57,6 @@ func receive(addr *net.UDPAddr, messageCh chan message) {
 	}
 }
 
-// func send(addr *net.UDPAddr, msg message) {
-// 	conn, err := net.DialUDP("udp", nil, addr)
-// 	checkError(err)
-// 	defer conn.Close()
-
-// 	Logger.LogLocalEvent("Priprava sporocila ", opts)
-// 	data := Logger.PrepareSend("Poslano sporocilo ", []byte(fmt.Sprintf("%d:%s", msg.ID, msg.Content)), opts)
-// 	_, err = conn.Write(data)
-// 	checkError(err)
-// }
-
 func send(addr *net.UDPAddr, msg message) {
 	conn, err := net.DialUDP("udp", nil, addr)
 	checkError(err)
@@ -86,38 +75,38 @@ func send(addr *net.UDPAddr, msg message) {
 }
 
 
-func getRandomRecipients(excludeID int, count int, total int) []int {
+func getRandomProcesses(excludeID int, count int, total int) []int {
 	rand.Seed(time.Now().UnixNano())
-	recipients := make(map[int]bool)
-	for len(recipients) < count {
+	processesToForwardTo := make(map[int]bool)
+	for len(processesToForwardTo) < count {
 		randomID := rand.Intn(total)
 		if randomID != excludeID {
-			recipients[randomID] = true
+			processesToForwardTo[randomID] = true
 		}
 	}
 
-	keys := make([]int, 0, len(recipients))
-	for k := range recipients {
+	keys := make([]int, 0, len(processesToForwardTo))
+	for k := range processesToForwardTo {
 		keys = append(keys, k)
 	}
 	return keys
 }
 
 func broadcastMessage(msg message) {
-	recipients := getRandomRecipients(id, K, N)
-	for _, recipient := range recipients {
-		recipientAddr, _ := net.ResolveUDPAddr("udp", fmt.Sprintf("localhost:%d", basePort+recipient))
-		send(recipientAddr, msg)
+	receivers := getRandomProcesses(id, K, N)
+	for _, receiver := range receivers {
+		receiverAddr, _ := net.ResolveUDPAddr("udp", fmt.Sprintf("localhost:%d", basePort+receiver))
+		send(receiverAddr, msg)
 		time.Sleep(100 * time.Millisecond)
 	}
 }
 
 func main() {
-	portPtr := flag.Int("p", 9273, "Base port")
+	portPtr := flag.Int("p", 9273, "base port")
 	idPtr := flag.Int("id", 0, "process ID")
-	nPtr := flag.Int("n", 2, "total number of processes")
+	nPtr := flag.Int("n", 4, "total number of processes")
 	mPtr := flag.Int("m", 3, "number of messages to send")
-	kPtr := flag.Int("k", 3, "number of messages to forward")
+	kPtr := flag.Int("k", 3, "number of processes to forward to")
 	flag.Parse()
 
 	basePort = *portPtr
@@ -133,28 +122,25 @@ func main() {
 	checkError(err)
 
 	messageCh := make(chan message, 10)
-	processed = make(map[int]bool)
+	alreadyProcessed = make(map[int]bool)
 
 	go receive(localAddr, messageCh)
 
 	if id == 0 {
 		for i := 1; i <= M; i++ {
 			msg := message{ID: i, Content: strconv.Itoa(i)}
-			processed[msg.ID] = true
-			fmt.Printf("Process %d initiated message: %s\n", id, msg.Content)
+			alreadyProcessed[msg.ID] = true
 			broadcastMessage(msg)
 		}
 	} else {
 			for {
 				select {
 				case msg := <- messageCh:
-					if !processed[msg.ID] {
-						processed[msg.ID] = true
-						fmt.Printf("Process %d received message: %s\n", id, msg.Content)
+					if !alreadyProcessed[msg.ID] {
+						alreadyProcessed[msg.ID] = true
 						broadcastMessage(msg)
 					}
 				case <-time.After(45 * time.Second):
-					fmt.Printf("Process %d timed out. No new messages received.\n", id)
 					return
 				}
 			}
