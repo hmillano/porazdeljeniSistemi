@@ -6,7 +6,6 @@ import (
 	"math/rand"
 	"net"
 	"strconv"
-	"strings"
 	"time"
 
 	"github.com/DistributedClocks/GoVector/govec"
@@ -15,7 +14,6 @@ import (
 type message struct {
 	ID      int
 	Content string
-	FromID  int // id from the previous process
 }
 
 var (
@@ -26,7 +24,7 @@ var (
 	K         int
 	id        int
 	basePort  int
-	processed map[int]bool // Track processed message IDs
+	processed map[int]bool
 )
 
 func checkError(err error) {
@@ -51,38 +49,35 @@ func receive(addr *net.UDPAddr, messageCh chan message) {
 		var receivedData string
 		Logger.UnpackReceive("Prejeto sporocilo ", buffer[:n], &receivedData, opts)
 
-		// Updated parsing logic to correctly extract ID, FromID, and Content
-		var msgID, fromID int
+		var msgID int
 		var content string
+		fmt.Sscanf(receivedData, "%d:%s", &msgID, &content)
 
-		// Split the received string by ':' and parse values
-		parts := strings.SplitN(receivedData, ":", 3)
-		if len(parts) == 3 {
-			msgID, err = strconv.Atoi(parts[0])
-			checkError(err)
-			fromID, err = strconv.Atoi(parts[1])
-			checkError(err)
-			content = parts[2]
-		} else {
-			fmt.Printf("Process %d received invalid message format: %s\n", id, receivedData)
-			continue
-		}
-
-		// Send the parsed message to the channel
-		messageCh <- message{ID: msgID, Content: content, FromID: fromID}
+		messageCh <- message{ID: msgID, Content: content}
 	}
 }
+
+// func send(addr *net.UDPAddr, msg message) {
+// 	conn, err := net.DialUDP("udp", nil, addr)
+// 	checkError(err)
+// 	defer conn.Close()
+
+// 	Logger.LogLocalEvent("Priprava sporocila ", opts)
+// 	data := Logger.PrepareSend("Poslano sporocilo ", []byte(fmt.Sprintf("%d:%s", msg.ID, msg.Content)), opts)
+// 	_, err = conn.Write(data)
+// 	checkError(err)
+// }
 
 func send(addr *net.UDPAddr, msg message) {
 	conn, err := net.DialUDP("udp", nil, addr)
 	checkError(err)
 	defer conn.Close()
 
-	Logger.LogLocalEvent(fmt.Sprintf("Priprava sporocila : %d", msg.ID), opts)
+	Logger.LogLocalEvent(fmt.Sprintf("Priprava sporocila z ID: %d", msg.ID), opts)
 
 	data := Logger.PrepareSend(
-		fmt.Sprintf("Poslano sporocilo : %d", msg.ID),
-		[]byte(fmt.Sprintf("%d:%d:%s", msg.ID, msg.FromID, msg.Content)),
+		fmt.Sprintf("Poslano sporocilo z ID: %d", msg.ID),
+		[]byte(fmt.Sprintf("%d:%s", msg.ID, msg.Content)),
 		opts,
 	)
 
@@ -91,12 +86,12 @@ func send(addr *net.UDPAddr, msg message) {
 }
 
 
-func getRandomRecipients(excludeIDs map[int]bool, count int, total int) []int {
+func getRandomRecipients(excludeID int, count int, total int) []int {
 	rand.Seed(time.Now().UnixNano())
 	recipients := make(map[int]bool)
 	for len(recipients) < count {
 		randomID := rand.Intn(total)
-		if !excludeIDs[randomID] {
+		if randomID != excludeID {
 			recipients[randomID] = true
 		}
 	}
@@ -108,8 +103,8 @@ func getRandomRecipients(excludeIDs map[int]bool, count int, total int) []int {
 	return keys
 }
 
-func broadcastMessage(msg message, excludeIDs map[int]bool) {
-	recipients := getRandomRecipients(excludeIDs, K, N)
+func broadcastMessage(msg message) {
+	recipients := getRandomRecipients(id, K, N)
 	for _, recipient := range recipients {
 		recipientAddr, _ := net.ResolveUDPAddr("udp", fmt.Sprintf("localhost:%d", basePort+recipient))
 		send(recipientAddr, msg)
@@ -120,7 +115,7 @@ func broadcastMessage(msg message, excludeIDs map[int]bool) {
 func main() {
 	portPtr := flag.Int("p", 9273, "Base port")
 	idPtr := flag.Int("id", 0, "process ID")
-	nPtr := flag.Int("n", 4, "total number of processes")
+	nPtr := flag.Int("n", 2, "total number of processes")
 	mPtr := flag.Int("m", 3, "number of messages to send")
 	kPtr := flag.Int("k", 3, "number of messages to forward")
 	flag.Parse()
@@ -144,33 +139,24 @@ func main() {
 
 	if id == 0 {
 		for i := 1; i <= M; i++ {
-			msg := message{ID: i, Content: strconv.Itoa(i), FromID: id}
-			// Mark message as processed
+			msg := message{ID: i, Content: strconv.Itoa(i)}
 			processed[msg.ID] = true
 			fmt.Printf("Process %d initiated message: %s\n", id, msg.Content)
-			broadcastMessage(msg, map[int]bool{id: true}) // Exclude itself from sending
+			broadcastMessage(msg)
 		}
 	} else {
-		for {
-			select {
-			case msg := <-messageCh:
-				if !processed[msg.ID] {
-					// Mark the message ID as processed
-					processed[msg.ID] = true
-
-					fmt.Printf("Process %d received message: %s from Process %d\n", id, msg.Content, msg.FromID)
-
-					// Prepare exclusion list: Add the sender to avoid sending it back
-					excludeIDs := map[int]bool{id: true, msg.FromID: true}
-
-					// Forward the message
-					msg.FromID = id // Update the sender ID to current process
-					broadcastMessage(msg, excludeIDs)
+			for {
+				select {
+				case msg := <- messageCh:
+					if !processed[msg.ID] {
+						processed[msg.ID] = true
+						fmt.Printf("Process %d received message: %s\n", id, msg.Content)
+						broadcastMessage(msg)
+					}
+				case <-time.After(45 * time.Second):
+					fmt.Printf("Process %d timed out. No new messages received.\n", id)
+					return
 				}
-			case <-time.After(45 * time.Second):
-				fmt.Printf("Process %d timed out. No new messages received.\n", id)
-				return
 			}
 		}
-	}
 }
