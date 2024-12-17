@@ -6,5 +6,5 @@
 
 module load Go
 go build .
-srun naloga3 -p 9273 -id $SLURM_ARRAY_TASK_ID -n $SLURM_ARRAY_TASK_COUNT
+srun naloga3 -p 9273 -id $SLURM_ARRAY_TASK_ID -n $SLURM_ARRAY_TASK_COUNT -m 4 -k 3
 ~/go/bin/GoVector --log_type shiviz --log_dir . --outfile Log-Full.log

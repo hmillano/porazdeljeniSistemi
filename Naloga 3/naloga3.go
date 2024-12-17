@@ -57,16 +57,34 @@ func receive(addr *net.UDPAddr, messageCh chan message) {
 	}
 }
 
+// func send(addr *net.UDPAddr, msg message) {
+// 	conn, err := net.DialUDP("udp", nil, addr)
+// 	checkError(err)
+// 	defer conn.Close()
+
+// 	Logger.LogLocalEvent("Priprava sporocila ", opts)
+// 	data := Logger.PrepareSend("Poslano sporocilo ", []byte(fmt.Sprintf("%d:%s", msg.ID, msg.Content)), opts)
+// 	_, err = conn.Write(data)
+// 	checkError(err)
+// }
+
 func send(addr *net.UDPAddr, msg message) {
 	conn, err := net.DialUDP("udp", nil, addr)
 	checkError(err)
 	defer conn.Close()
 
-	Logger.LogLocalEvent("Priprava sporocila ", opts)
-	data := Logger.PrepareSend("Poslano sporocilo ", []byte(fmt.Sprintf("%d:%s", msg.ID, msg.Content)), opts)
+	Logger.LogLocalEvent(fmt.Sprintf("Priprava sporocila z ID: %d", msg.ID), opts)
+
+	data := Logger.PrepareSend(
+		fmt.Sprintf("Poslano sporocilo z ID: %d", msg.ID),
+		[]byte(fmt.Sprintf("%d:%s", msg.ID, msg.Content)),
+		opts,
+	)
+
 	_, err = conn.Write(data)
 	checkError(err)
 }
+
 
 func getRandomRecipients(excludeID int, count int, total int) []int {
 	rand.Seed(time.Now().UnixNano())
@@ -130,7 +148,7 @@ func main() {
 			for {
 				select {
 				case msg := <- messageCh:
-					if !processed[msg.ID] { // Process the message only if it's new
+					if !processed[msg.ID] {
 						processed[msg.ID] = true
 						fmt.Printf("Process %d received message: %s\n", id, msg.Content)
 						broadcastMessage(msg)
