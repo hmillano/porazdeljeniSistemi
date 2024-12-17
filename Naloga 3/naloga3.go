@@ -47,7 +47,7 @@ func receive(addr *net.UDPAddr, messageCh chan message) {
 		}
 
 		var receivedData string
-		Logger.UnpackReceive("Prejeto sporocilo", buffer[:n], &receivedData, opts)
+		Logger.UnpackReceive("Prejeto sporocilo ", buffer[:n], &receivedData, opts)
 
 		var msgID int
 		var content string
@@ -118,8 +118,6 @@ func main() {
 	processed = make(map[int]bool)
 
 	go receive(localAddr, messageCh)
-
-	processed = make(map[int]bool)
 
 	if id == 0 {
 		for i := 1; i <= M; i++ {
