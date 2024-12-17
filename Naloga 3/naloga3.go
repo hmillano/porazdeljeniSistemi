@@ -116,8 +116,8 @@ func main() {
 	portPtr := flag.Int("p", 9273, "Base port")
 	idPtr := flag.Int("id", 0, "process ID")
 	nPtr := flag.Int("n", 2, "total number of processes")
-	mPtr := flag.Int("m", 1, "number of messages to send")
-	kPtr := flag.Int("k", 2, "number of messages to forward")
+	mPtr := flag.Int("m", 3, "number of messages to send")
+	kPtr := flag.Int("k", 3, "number of messages to forward")
 	flag.Parse()
 
 	basePort = *portPtr
