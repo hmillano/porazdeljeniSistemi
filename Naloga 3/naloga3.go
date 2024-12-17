@@ -25,7 +25,7 @@ var (
 	K         int
 	id        int
 	basePort  int
-	processed map[int]map[int]bool // map of senderID -> map of processed message IDs
+	processed map[int]bool // Track processed message IDs
 )
 
 func checkError(err error) {
@@ -64,10 +64,10 @@ func send(addr *net.UDPAddr, msg message) {
 	checkError(err)
 	defer conn.Close()
 
-	Logger.LogLocalEvent(fmt.Sprintf("Priprava sporocila z ID: %d", msg.ID), opts)
+	Logger.LogLocalEvent(fmt.Sprintf("Priprava sporocila : %d", msg.ID), opts)
 
 	data := Logger.PrepareSend(
-		fmt.Sprintf("Poslano sporocilo z ID: %d", msg.ID),
+		fmt.Sprintf("Poslano sporocilo : %d", msg.ID),
 		[]byte(fmt.Sprintf("%d:%d:%s", msg.ID, msg.FromID, msg.Content)),
 		opts,
 	)
@@ -77,12 +77,12 @@ func send(addr *net.UDPAddr, msg message) {
 }
 
 
-func getRandomRecipients(excludeID int, count int, total int) []int {
+func getRandomRecipients(excludeIDs map[int]bool, count int, total int) []int {
 	rand.Seed(time.Now().UnixNano())
 	recipients := make(map[int]bool)
 	for len(recipients) < count {
 		randomID := rand.Intn(total)
-		if randomID != excludeID {
+		if !excludeIDs[randomID] {
 			recipients[randomID] = true
 		}
 	}
@@ -94,8 +94,8 @@ func getRandomRecipients(excludeID int, count int, total int) []int {
 	return keys
 }
 
-func broadcastMessage(msg message) {
-	recipients := getRandomRecipients(id, K, N)
+func broadcastMessage(msg message, excludeIDs map[int]bool) {
+	recipients := getRandomRecipients(excludeIDs, K, N)
 	for _, recipient := range recipients {
 		recipientAddr, _ := net.ResolveUDPAddr("udp", fmt.Sprintf("localhost:%d", basePort+recipient))
 		send(recipientAddr, msg)
@@ -123,39 +123,35 @@ func main() {
 	localAddr, err := net.ResolveUDPAddr("udp", fmt.Sprintf("localhost:%d", basePort+id))
 	checkError(err)
 
-	messageCh := make(chan message, 20)
-	processed = make(map[int]map[int]bool)
+	messageCh := make(chan message, 10)
+	processed = make(map[int]bool)
 
 	go receive(localAddr, messageCh)
 
 	if id == 0 {
 		for i := 1; i <= M; i++ {
 			msg := message{ID: i, Content: strconv.Itoa(i), FromID: id}
-			// Mark message as processed for this process
-			if _, exists := processed[id]; !exists {
-				processed[id] = make(map[int]bool)
-			}
-			processed[id][msg.ID] = true
+			// Mark message as processed
+			processed[msg.ID] = true
 			fmt.Printf("Process %d initiated message: %s\n", id, msg.Content)
-			broadcastMessage(msg)
+			broadcastMessage(msg, map[int]bool{id: true}) // Exclude itself from sending
 		}
 	} else {
 		for {
 			select {
 			case msg := <-messageCh:
-				// Check if this message has already been processed from this sender
-				if !processed[msg.FromID][msg.ID] {
-					// Mark this message as processed from the sender
-					if _, exists := processed[id]; !exists {
-						processed[id] = make(map[int]bool)
-					}
-					processed[id][msg.ID] = true
+				if !processed[msg.ID] {
+					// Mark the message ID as processed
+					processed[msg.ID] = true
 
-					fmt.Printf("Process %d received message: %s\n", id, msg.Content)
+					fmt.Printf("Process %d received message: %s from Process %d\n", id, msg.Content, msg.FromID)
 
-					// Forward the message to other processes (excluding the sender)
-					msg.FromID = id // Change the sender ID to the current process id
-					broadcastMessage(msg)
+					// Prepare exclusion list: Add the sender to avoid sending it back
+					excludeIDs := map[int]bool{id: true, msg.FromID: true}
+
+					// Forward the message
+					msg.FromID = id // Update the sender ID to current process
+					broadcastMessage(msg, excludeIDs)
 				}
 			case <-time.After(45 * time.Second):
 				fmt.Printf("Process %d timed out. No new messages received.\n", id)
