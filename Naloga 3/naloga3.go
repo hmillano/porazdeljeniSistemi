@@ -17,14 +17,15 @@ type message struct {
 }
 
 var (
-	Logger    *govec.GoLog
-	opts      govec.GoLogOptions
-	N         int
-	M         int
-	K         int
-	id        int
-	basePort  int
+	Logger          *govec.GoLog
+	opts            govec.GoLogOptions
+	N               int
+	M               int
+	K               int
+	id              int
+	basePort        int
 	alreadyProcessed map[int]bool
+	previousSender   map[int]int
 )
 
 func checkError(err error) {
@@ -33,7 +34,7 @@ func checkError(err error) {
 	}
 }
 
-func receive(addr *net.UDPAddr, messageCh chan message) {
+func receive(addr *net.UDPAddr, messageCh chan message, senderCh chan int) {
 	conn, err := net.ListenUDP("udp", addr)
 	checkError(err)
 	defer conn.Close()
@@ -41,7 +42,7 @@ func receive(addr *net.UDPAddr, messageCh chan message) {
 	buffer := make([]byte, 1024)
 	for {
 		conn.SetDeadline(time.Now().Add(10 * time.Second))
-		n, _, err := conn.ReadFromUDP(buffer)
+		n, remoteAddr, err := conn.ReadFromUDP(buffer)
 		if err != nil {
 			return
 		}
@@ -53,7 +54,12 @@ func receive(addr *net.UDPAddr, messageCh chan message) {
 		var content string
 		fmt.Sscanf(receivedData, "%d:%s", &msgID, &content)
 
+		// Extract sender ID from the remote address
+		senderPort := remoteAddr.Port
+		senderID := senderPort - basePort
+
 		messageCh <- message{ID: msgID, Content: content}
+		senderCh <- senderID
 	}
 }
 
@@ -74,13 +80,12 @@ func send(addr *net.UDPAddr, msg message) {
 	checkError(err)
 }
 
-
-func getRandomProcesses(excludeID int, count int, total int) []int {
+func getRandomProcesses(excludeIDs map[int]bool, count int, total int) []int {
 	rand.Seed(time.Now().UnixNano())
 	processesToForwardTo := make(map[int]bool)
 	for len(processesToForwardTo) < count {
 		randomID := rand.Intn(total)
-		if randomID != excludeID {
+		if !excludeIDs[randomID] {
 			processesToForwardTo[randomID] = true
 		}
 	}
@@ -92,8 +97,9 @@ func getRandomProcesses(excludeID int, count int, total int) []int {
 	return keys
 }
 
-func broadcastMessage(msg message) {
-	receivers := getRandomProcesses(id, K, N)
+func broadcastMessage(msg message, excludeID int) {
+	excludeIDs := map[int]bool{excludeID: true, id: true} // Exclude previous sender and self
+	receivers := getRandomProcesses(excludeIDs, K, N)
 	for _, receiver := range receivers {
 		receiverAddr, _ := net.ResolveUDPAddr("udp", fmt.Sprintf("localhost:%d", basePort+receiver))
 		send(receiverAddr, msg)
@@ -122,27 +128,31 @@ func main() {
 	checkError(err)
 
 	messageCh := make(chan message, 10)
+	senderCh := make(chan int, 10)
 	alreadyProcessed = make(map[int]bool)
+	previousSender = make(map[int]int)
 
-	go receive(localAddr, messageCh)
+	go receive(localAddr, messageCh, senderCh)
 
 	if id == 0 {
 		for i := 1; i <= M; i++ {
 			msg := message{ID: i, Content: strconv.Itoa(i)}
 			alreadyProcessed[msg.ID] = true
-			broadcastMessage(msg)
+			broadcastMessage(msg, -1) // No previous sender for initial messages
 		}
 	} else {
-			for {
-				select {
-				case msg := <- messageCh:
-					if !alreadyProcessed[msg.ID] {
-						alreadyProcessed[msg.ID] = true
-						broadcastMessage(msg)
-					}
-				case <-time.After(45 * time.Second):
-					return
+		for {
+			select {
+			case msg := <-messageCh:
+				sender := <-senderCh
+				if !alreadyProcessed[msg.ID] {
+					alreadyProcessed[msg.ID] = true
+					previousSender[msg.ID] = sender
+					broadcastMessage(msg, sender)
 				}
+			case <-time.After(45 * time.Second):
+				return
 			}
 		}
+	}
 }
